@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -28,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -60,6 +63,12 @@ private data class TradeEntry(
     val profit: Double
 )
 
+private data class DofusItem(
+    val name: String,
+    val level: Int?,
+    val type: String?
+)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,6 +84,8 @@ fun ProfitCalculator() {
     var extraInvestment by remember { mutableStateOf("") }
     var sellingPrice by remember { mutableStateOf("") }
     var savedTrades by remember { mutableStateOf(TradeStorage.load(context)) }
+    val catalogItems = remember(context) { DofusItemCatalog.load(context) }
+    var customItems by remember { mutableStateOf(DofusItemCatalog.loadCustom(context)) }
     var selectedTab by remember { mutableStateOf(0) }
 
     val purchase = purchasePrice.toAmount()
@@ -97,9 +108,15 @@ fun ProfitCalculator() {
         Text("See what you earned.", style = MaterialTheme.typography.bodyLarge)
 
         Spacer(Modifier.height(4.dp))
-        OutlinedTextField(
-            value = itemName, onValueChange = { itemName = it }, modifier = Modifier.fillMaxWidth(),
-            label = { Text("Item name") }, singleLine = true
+        DofusItemPicker(
+            value = itemName,
+            catalogItems = catalogItems,
+            customItemNames = customItems,
+            onValueChange = { itemName = it },
+            onAddCustomItem = { name ->
+                customItems = (customItems + name).distinctBy { it.lowercase() }.sorted()
+                DofusItemCatalog.saveCustom(context, customItems)
+            }
         )
         MoneyField("Purchase price", purchasePrice) { purchasePrice = it }
         MoneyField("Additional investment", extraInvestment) { extraInvestment = it }
@@ -155,6 +172,76 @@ fun ProfitCalculator() {
                     Toast.makeText(context, "Saved item deleted.", Toast.LENGTH_SHORT).show()
                 }
             )
+        }
+    }
+}
+
+@Composable
+private fun DofusItemPicker(
+    value: String,
+    catalogItems: List<DofusItem>,
+    customItemNames: List<String>,
+    onValueChange: (String) -> Unit,
+    onAddCustomItem: (String) -> Unit
+) {
+    var showSuggestions by remember { mutableStateOf(false) }
+    val allItems = remember(catalogItems, customItemNames) {
+        customItemNames.map { DofusItem(name = it, level = null, type = "Ajouté") } + catalogItems
+    }
+    val query = value.trim()
+    val matches = remember(allItems, query) {
+        allItems.filter { item -> query.isBlank() || item.name.contains(query, ignoreCase = true) }.take(8)
+    }
+    val isKnownItem = allItems.any { it.name.equals(query, ignoreCase = true) }
+
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {
+                onValueChange(it)
+                showSuggestions = true
+            },
+            modifier = Modifier.fillMaxWidth().onFocusChanged { showSuggestions = it.isFocused },
+            label = { Text("Équipement Dofus (niv. 190+)") },
+            placeholder = { Text("Rechercher un équipement français") },
+            singleLine = true
+        )
+        if (showSuggestions && (matches.isNotEmpty() || (query.isNotEmpty() && !isKnownItem))) {
+            Card(modifier = Modifier.fillMaxWidth().heightIn(max = 280.dp)) {
+                Column(Modifier.padding(vertical = 4.dp)) {
+                    matches.forEach { item ->
+                        val details = listOfNotNull(
+                            item.type,
+                            item.level?.let { "niv. $it" }
+                        ).joinToString(" · ")
+                        TextButton(
+                            onClick = {
+                                onValueChange(item.name)
+                                showSuggestions = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = if (details.isEmpty()) item.name else "${item.name} — $details",
+                                modifier = Modifier.fillMaxWidth(),
+                                textAlign = TextAlign.Start
+                            )
+                        }
+                    }
+                    if (query.isNotEmpty() && !isKnownItem) {
+                        TextButton(
+                            onClick = {
+                                onAddCustomItem(query)
+                                onValueChange(query)
+                                showSuggestions = false
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Ajouter \"$query\" comme item personnalisé")
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -341,6 +428,39 @@ private object TradeStorage {
         }
         context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
             .edit().putString(TRADES_KEY, array.toString()).apply()
+    }
+}
+
+private object DofusItemCatalog {
+    private const val FILE_NAME = "dofus_equipment_190_plus_fr.json"
+    private const val PREFERENCES = "dofus_item_catalog"
+    private const val CUSTOM_ITEMS_KEY = "custom_items"
+
+    fun load(context: Context): List<DofusItem> = runCatching {
+        val root = context.assets.open(FILE_NAME).bufferedReader().use { JSONObject(it.readText()) }
+        val items = root.getJSONArray("items")
+        List(items.length()) { index ->
+            val item = items.getJSONObject(index)
+            DofusItem(
+                name = item.getString("name"),
+                level = item.getInt("level"),
+                type = item.getString("type")
+            )
+        }
+    }.getOrDefault(emptyList())
+
+    fun loadCustom(context: Context): List<String> = runCatching {
+        val data = context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+            .getString(CUSTOM_ITEMS_KEY, "[]")
+        val array = JSONArray(data)
+        List(array.length()) { index -> array.getString(index) }
+    }.getOrDefault(emptyList())
+
+    fun saveCustom(context: Context, names: List<String>) {
+        val array = JSONArray()
+        names.forEach(array::put)
+        context.getSharedPreferences(PREFERENCES, Context.MODE_PRIVATE)
+            .edit().putString(CUSTOM_ITEMS_KEY, array.toString()).apply()
     }
 }
 
