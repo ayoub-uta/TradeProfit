@@ -145,13 +145,20 @@ fun ProfitCalculator() {
         }
 
         } else {
-            SalesHistory(savedTrades)
+            SalesHistory(
+                trades = savedTrades,
+                onDelete = { index ->
+                    savedTrades = savedTrades.filterIndexed { currentIndex, _ -> currentIndex != index }
+                    TradeStorage.save(context, savedTrades)
+                    Toast.makeText(context, "Saved item deleted.", Toast.LENGTH_SHORT).show()
+                }
+            )
         }
     }
 }
 
 @Composable
-private fun SalesHistory(trades: List<TradeEntry>) {
+private fun SalesHistory(trades: List<TradeEntry>, onDelete: (Int) -> Unit) {
     Text("Sold items", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
     Text("Your saved sales and their profit.", style = MaterialTheme.typography.bodyLarge)
     if (trades.isEmpty()) {
@@ -160,18 +167,23 @@ private fun SalesHistory(trades: List<TradeEntry>) {
     }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            trades.asReversed().forEach { trade ->
+            trades.asReversed().forEachIndexed { displayIndex, trade ->
+                val originalIndex = trades.lastIndex - displayIndex
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(trade.name, fontWeight = FontWeight.SemiBold)
-                    AmountText(
-                        amount = trade.profit,
-                        fontWeight = FontWeight.Bold,
-                        color = if (trade.profit >= 0) Color(0xFF187A3B) else MaterialTheme.colorScheme.error
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(trade.name, fontWeight = FontWeight.SemiBold)
+                        AmountText(
+                            amount = trade.profit,
+                            fontWeight = FontWeight.Bold,
+                            color = if (trade.profit >= 0) Color(0xFF187A3B) else MaterialTheme.colorScheme.error
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Button(onClick = { onDelete(originalIndex) }) { Text("Delete") }
                 }
             }
         }
