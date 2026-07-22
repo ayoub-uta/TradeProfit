@@ -40,6 +40,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -80,7 +82,7 @@ fun ProfitCalculator() {
     val sale = sellingPrice.toAmount()
     val tax = sale * TAX_RATE
     val netResult = sale - tax - purchase - investment
-    val hasSalePrice = sellingPrice.toDoubleOrNull() != null
+    val hasSalePrice = sellingPrice.toAmountOrNull() != null
 
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(24.dp),
@@ -192,9 +194,14 @@ private fun SalesHistory(trades: List<TradeEntry>, onDelete: (Int) -> Unit) {
 
 @Composable
 private fun MoneyField(label: String, value: String, onValueChange: (String) -> Unit) {
+    // Recreate the selection after grouping inserts a space, so the next digit is
+    // appended instead of being inserted before an existing digit.
+    val formattedValue = remember(value) {
+        TextFieldValue(text = value, selection = TextRange(value.length))
+    }
     OutlinedTextField(
-        value = value,
-        onValueChange = { input -> if (input.matches(Regex("\\d*([.]\\d*)?"))) onValueChange(input) },
+        value = formattedValue,
+        onValueChange = { input -> onValueChange(input.text.formatAmountInput()) },
         modifier = Modifier.fillMaxWidth(),
         label = { Text(label) },
         prefix = {
@@ -268,7 +275,33 @@ private fun AmountText(
     }
 }
 
-private fun String.toAmount(): Double = replace(',', '.').toDoubleOrNull() ?: 0.0
+private fun String.toAmount(): Double = toAmountOrNull() ?: 0.0
+
+private fun String.toAmountOrNull(): Double? =
+    replace(" ", "").replace(',', '.').toDoubleOrNull()
+
+/** Keeps decimal input intact while grouping the whole-number part in threes. */
+private fun String.formatAmountInput(): String {
+    val cleaned = buildString {
+        var hasDecimalSeparator = false
+        this@formatAmountInput.forEach { character ->
+            when {
+                character.isDigit() -> append(character)
+                (character == '.' || character == ',') && !hasDecimalSeparator -> {
+                    append('.')
+                    hasDecimalSeparator = true
+                }
+            }
+        }
+    }
+
+    val decimalIndex = cleaned.indexOf('.')
+    val wholeNumber = if (decimalIndex == -1) cleaned else cleaned.substring(0, decimalIndex)
+    val decimalPart = if (decimalIndex == -1) "" else cleaned.substring(decimalIndex + 1)
+    val groupedWholeNumber = wholeNumber.reversed().chunked(3).joinToString(" ").reversed()
+
+    return if (decimalIndex == -1) groupedWholeNumber else "$groupedWholeNumber.$decimalPart"
+}
 private fun Double.kamasAmount(): String = NumberFormat.getNumberInstance().apply {
     maximumFractionDigits = 2
 }.format(this)
