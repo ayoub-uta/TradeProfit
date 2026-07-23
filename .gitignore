@@ -5,3 +5,26 @@ build/
 **/build/
 *.iml
 
+# Local tooling and task handoff files
+.agents/
+.codex/
+codex
+k9rj9zn.md
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+safe/
+keystore.properties
+*.jks
+*.keystore
+*.p12
+*.pem
+*.key
+
+# Generated Android release artifacts
+app/release/
+*.apk
+*.aab
+*.dm
